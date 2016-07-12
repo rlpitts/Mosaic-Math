@@ -1,0 +1,2 @@
+gunzip -c vlibm.tar.gz | tar xvf -
+

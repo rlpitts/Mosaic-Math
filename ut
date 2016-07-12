@@ -1,0 +1,2 @@
+gunzip -c vlib.tar.gz | tar xvf -
+
