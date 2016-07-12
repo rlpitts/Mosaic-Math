@@ -1,0 +1,12 @@
+# Uncomment and edit next line(s) if you need to set the basic IDL path:
+#
+#setenv IDL_DIR /astro/depot/rsi/idl/bin/idl
+# setenv  IDL_DIR  /usr/local/bin/idl
+#
+# setenv  IDL_PATH  "+/usr/local/lib/astrolib/pro:+$IDL_DIR/lib"
+#
+# Following is needed for MOSAIC:
+#setenv IDL_PATH +$IDL_DIR/lib:+$IDL_DIR/contrib:+$IDL_DIR/examples
+setenv  IDL_STARTUP  $HOME/idl/idl_startup.pro
+
+alias  mosaic  'cd ~/mosaic ; idl start'
