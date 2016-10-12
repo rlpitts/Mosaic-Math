@@ -12,26 +12,28 @@
 ;	     -->tau = N_H*kappa_0*(mu*m_H/G2D)*(nu/nu_0)^beta
 ;	but that may make N_H unmanageably big, & conversion to those units hard
 ; CALLING:
-;	gb = greybody( x, fdat, BETA=, KAPPA_0=, T0=, NCOL=, G2D=, XUNIT=, FUNIT=, NUNIT=)
+;	gb = greybody( x, fdat, BETA=, KAPPA_0=, ... see kwarg list)
 ; INPUTS:
 ;	x = array of wavelengths or frequencies, in any units allowed for XUNIT.
 ;		defaults to wavelength in microns
-;	fdat = 1D array of fluxes, or stack of images, at each wavelength, in Jy / arcsec^2.
+;	fluxarr = 1D array of fluxes, or stack of images, at each wavelength
+;		in either Jy / arcsec^2, MJy/sr, or W/m^2/hz
 ; KEYWORDS:
 ;	BETA = initial guess for emissivity
 ;	KAPPA_0 = initial guess for opacity at fiducial frequency nu_0 (tbd), in m^2/kg*
 ;	NT = optional # of temp. components (only 1 working atm)
+;	T_0 = scalar or length-2 array 
 ;	NCOL = initial guess for column density of dust, in either kg/m^2 or m^-2
 ;		default is kg/m^2
 ;	G2D = gas-to-dust ratio; default is 133
-;	XUNIT = string specifying units of abscissa
+;	XUNIT = string units of abscissa
 ;		accepts 'm', 'mm', 'um', 'nm', 'Hz', 'MHz', 'GHz', 'THz' 
 ;		default is 'um'
-;	FUNIT = alphanumeric string, either 'MJysr' or 'Jyarcsec2', specifying units of fdat
+;	FUNIT = alphanumeric string units of fdat
+;		accepts 'MJysr', 'Jyarcsec2', or 'Wm2hz' 
 ;		default is 'Jyarcsec2'
-;	NUNIT = string, either 'mass' or 'num', indicating if N_col is a mass or # density
-;		if 'num' and G2D isn't specified, G2D is set to its default
-;		default is mass-density; #-density not working yet
+;	MASSCOL = Bool, 1 (True) if N_col is a mass density, 0 (False) if N_col is # density
+;		default is 1 (#-density not working yet); if 0, G2D is set to its default
 ;	*note: 1 m^2/kg = 10 cm^2/g
 ; OUTPUTS:
 ;	Function returns array of Planck spectrum in units of Janskys/arcsec^2.
@@ -39,7 +41,7 @@
 ; COMMON BLOCKS:
 ;	TBD
 ; EXTERNAL CALLS:
-;	TBD (may use this to make function to call it in a loop)
+;	funit_conv
 ; HISTORY:
 ;	Written: Rebecca Pitts, 2016.
 ;---------------------------------------------------
@@ -52,11 +54,15 @@ function planck, nu, T
   end
 
 function mbb_opthin, nu, A
-	;; A[0] = T, A[1] = nu_0, A[2] = beta, A[3] = omega, A[4] = N_col, A[5] = kappa_0
+	;; A[0] = T, A[1] = nu_0, A[2] = beta, A[3] = N_col, A[4] = G2D, A[5] = kappa_0
+	;; assume mu = 2.8 & no need for omega
     	bb = planck(nu, A[0])
-	return, [((nu / A[1])^A[2] ) * A[3] * A[4] * A[5] * bb]
+	plaw = ((nu / A[1])^A[2] )
+	Sig = A[3] * double(2.8 * !const.mH) / A[4]
+	return, [ bb * plaw * Sig * A[5]]
   end
 
+;; use APEX SAM threshold to determine fg/bg contamination (maybe)
 ;;function rt1d_mbb, nudat, fldat,
 ;;	A[0] = T, A[1] = nu_0, A[2] = beta, A[3] = omega, A[4] = N_col, A[5] = kappa_0
 ;;    	bb = planck(nu, A[0])
@@ -65,34 +71,8 @@ function mbb_opthin, nu, A
 
 ;;function PAHmodel,...
 
-
-function greybody, x, fluxarr, XUNIT=xunit, FUNIT=funit, NUNIT=nunit, TCOMPS=tcomps, $
-			BETA=beta, KAPPA_0=kappa_0, NCOL=ncol, G2D=g2d;;, $
-			;;PAR_INIT=parmInit, PAR_MIN=Pmin, PAR_MAX=Pmax, PAR_FIT=parmFit, $
-			;;TC_0=Tc_0, TH_0=Th_0, NPARFIX=nparfix, PLOTFIT=plotfit, $
-			;;INFO=info, VERBOSE=verbose, SHOW=show, MAXITER=maxit
-			;;use NPARFIX to pick which parameters to fit
-
-   ;;common IR_spectrum_fit, fitControl, WghtControl
-   ;;common IR_spectrum_fit0, fitInitParams
-   ;;common IR_spectrum_fit1, fitPlotOptions
-   ;;common IR_spectrum_fit2, FitParLimits
-
-	Nwav = N_elements(x)
-	imd = size(fluxarr,/dimensions) ;;imd[-1] will be the same whether 1D or 3D - I checked
-	if (Nwav LE 0) then return,0
-
-	if (Nwav NE imd[-1]) then begin
-		message,"Error: Image cube depth =/= size of wavelength array" $
-			+ string(7b),/INFO
-		print,Nwav,imd
-		return,0
-          endif
-
-    	if n_elements(xunit) lt 1 then xunit='um'
-    	if n_elements(funit) lt 1 then funit='Jyarcsec2'
-
-    	case xunit of
+function x2nu, x, u
+	case u of
 	    'm': nudat = reverse((double(!const.c))/x)
 	    'mm': nudat = reverse((double(!const.c) * 1e+3) / x)
 	    'um': nudat = reverse((double(!const.c) * 1e+6) / x)
@@ -103,19 +83,57 @@ function greybody, x, fluxarr, XUNIT=xunit, FUNIT=funit, NUNIT=nunit, TCOMPS=tco
 	    'THz': nudat = double(x) * 1e+12
 	    else: message, 'Not a valid wavelength or frequency unit. Check spelling and case.'
           endcase
-    
-    	if (xunit eq 'm') || (xunit eq 'mm') || (xunit eq 'um') || (xunit eq 'nm') then rf = reverse(reform(double(fluxarr)),3) else $
-     	  rf = reform(double(fluxarr))
-	;;reverse(a,3) reverses array depthwise
+  	return, nudat
+  end
 
-    	case funit of
+function fucon, f, u, xu, invrs
+    ;; doesn't matter what invrs is if not 0
+    if (where(strmatch(xu,'*Hz',/fold_case)) eq -1) then rf = reverse(reform(double(f))) else $
+     	  rf = reform(double(f)) ;;reverse(a,3) reverses array depthwise
+    ;; if invrs=1, flux array should be already reversed so reversing again should set it right
+    if (invrs eq 0) or ~keyword_set(invrs) then begin
+	case u of
 	    ;; 1 MJy/sr = 2.350443e-5 Jy/arcsec^2 = 10^-20 W/m^2/Hz
-	    'Jyarcsec2': fdat = (rf / double(2.350443e-5)) * 1e-20
-	    'MJysr' : fdat = rf * 1e-20
-	    'Wm2Hz' : fdat = rf
+	    'Jyarcsec2': newf = (rf / double(2.350443e-5)) * 1e-20
+	    'MJysr' : newf = rf * 1e-20
+	    'Wm2Hz' : newf = rf
 	    else: message, "Not a valid flux density unit. Enter 'MJysr', 'Jyarcsec2', or 'Wm2Hz'."
 	  endcase
+      endif else begin
+	case u of
+	    'Jyarcsec2': newf = (rf * double(2.350443e-5)) * 1e+20
+	    'MJysr' : newf = rf * 1e+20
+	    'Wm2Hz' : newf = rf
+	    else: message, "Not a valid flux density unit. Enter 'MJysr', 'Jyarcsec2', or 'Wm2Hz'."
+	  endcase
+      endelse
+  return, newf
+  end
 
+function greybody, x, fluxarr, XUNIT=xunit, FUNIT=funit, T_0=t_0, BETA=beta, $
+			NCOL=ncol, MU=mu, KAPPA_0=kappa_0, G2D=g2d;;, $
+			;;PAR_INIT=parmInit, PAR_MIN=Pmin, PAR_MAX=Pmax, PAR_FIT=parmFit, $
+			;;NPARFIX=nparfix, PLOTFIT=plotfit, $
+			;;INFO=info, VERBOSE=verbose, SHOW=show, MAXITER=maxit
+			;;use NPARFIX to pick which parameters to fit
+
+   ;;common IR_spectrum_fit, fitControl, WghtControl
+   ;;common IR_spectrum_fit0, fitInitParams
+   ;;common IR_spectrum_fit1, fitPlotOptions
+   ;;common IR_spectrum_fit2, FitParLimits
+
+	Nwav = N_elements(x)
+	if (Nwav LE 0) then RETALL
+	if (Nwav NE size(reform(fluxarr),/dimensions)) then begin
+		message,"Error: single pixel stack extraction failed" $
+			+ string(7b),/INFO
+		RETALL,Nwav
+          endif
+
+    	if n_elements(xunit) lt 1 then xunit='um'
+    	if n_elements(funit) lt 1 then funit='Jyarcsec2'
+	nudat = x2nu(x,xunit)
+    	fdat = fucon(fluxarr,funit,xunit,0)
 	if funit eq 'Jyarcsec2' then omega = double(( !DTOR/3600 )^2) else omega = 1.0
 
 	if n_elements(beta) ne 1 then begin
@@ -136,8 +154,7 @@ function greybody, x, fluxarr, XUNIT=xunit, FUNIT=funit, NUNIT=nunit, TCOMPS=tco
 		  endif else begin
 			if (kappa_0 gt 0.1) and (kappa_0 lt 0.3) then nu0 = (double(!const.c) * 1e+6)/350 else $
 			if (kappa_0 gt 0.4) and (kappa_0 lt 0.6) then nu0 = (double(!const.c) * 1e+6)/250 else $
-			 print, 'opacity incompatible with built-in emissivity and fiducial frequency values.'
-			return,0
+			STOP, 'opacity incompatible with built-in emissivity and fiducial frequency values.'
 		  endelse	
 	  endif
 	;;lower beta should be better since that makes the power law curve wider & flatter
@@ -145,36 +162,60 @@ function greybody, x, fluxarr, XUNIT=xunit, FUNIT=funit, NUNIT=nunit, TCOMPS=tco
 	;;Maybe one day I'll incorporate the ability to calculate the fiducial wavelength & kappa
 	;; BUT IT IS NOT THIS DAY.
 
-	if n_elements(ncol) ne 1 then ncol = 5.0e+21 * 1e+4 ;;H2mol/m^2
-	if n_elements(nunit) ne 1 then nunit = 'mass'
-	if nunit eq 'mass' then begin
-	    n_md = double(ncol)
-	  endif else begin
-	    if nunit eq 'num' then begin
-		mu = 2.8 ;;mmw per unit H - assumes 71% H, 27% He, 2% everything else
-		mh = double(1.673534e-27)
-		if n_elements(g2d) ne 1 then g2d = 133
-		n_md = mu*mh*double(ncol)/g2d
-	      endif
-	  endelse
+	if n_elements(ncol) ne 1 then ncol = 5.0e+21 * 1e+4 ;;H2mol/m^2, number density
+	if n_elements(mu) ne 1 then mu = double(2.8) ;;mmw per unit H - assumes 71% H, 27% He, 2% Z
+	;;from Arthur Cox 2000 reproduction of "Allen's Astrophysical Quantities" (1955) - everyone uses this
+	;;alternative cited by Wikipedia doesn't seem to be reliable
+	if n_elements(g2d) ne 1 then g2d = double(133.) ;;from Compiegne 2011
+	if g2d lt 1 then g2d = 1/g2d
 	
-	;; A[0] = T, A[1] = nu_0, A[2] = beta, A[3] = omega, A[4] = N_col, A[5] = kappa_0
-	;; 1st value in par_info to be replaced with Tc_0 later
-	par_info = replicate({value:0.D, fixed:1, limited:[1,1], limits:[0.D,0]}, 6)
-	par_info[*].value = [20,nu0,beta,omega,ncol,kappa_0] ;; omega should always be fixed
-	par_info[0].fixed = 0
-	par_info[0].limits = [2.73,90]
-	par_info[1].limits = [min(nudat),max(nudat)]
-	par_info[2].limits = [0,5.0]
-	par_info[4].limits = [double(1.0e24),double(1.0e28)]
-	par_info[5].limits = [0.01,1.0]
+	if (n_elements(T_0) eq 1) OR (T_0[-1] eq 0) then begin ;if T_0 is INT, T_0[-1]=T_0[0]
+	    Tc_0 = double(T_0[0])
 
-	if (n_elements(tcomps) ne 1) or (tcomps eq 1) then begin
+	    ;; A[0] = T, A[1] = nu_0, A[2] = beta, A[3] = omega, A[4] = N_col, A[5] = kappa_0
+	    ;; 1st value in par_info to be replaced with Tc_0 later
+	    par_info = replicate({value:0.D, fixed:1, limited:[1,1], limits:[0.D,0]}, 6)
+	    par_info[*].value = [Tc_0,nu0,beta,ncol,g2d,kappa_0] ;; omega should always be fixed
+	    par_info[0].fixed = 0
+	    ;par_info[0].limits = [2.73,90]
+	    ;par_info[1].limits = [min(nudat),max(nudat)]
+	    ;par_info[2].limits = [0,5.0]
+	    ;par_info[3].limits = [double(1.0e24),double(1.0e28)]
+	    ;par_info[4].limits = [100.0,160.0]
+	    ;par_info[5].limits = [0.01,1.0]
+
 	    dstruct = {x:nudat,f:fdat}
 	    pars = mpfit("mbb_opthin",functargs=dstruct,parinfo=par_info)
-	    fmodel = mbb_opthin(nudat, pars)
+	    fmod = mbb_opthin(nudat, pars)
 	  endif
+	restruct = {nu:nudat, fdata:fdat, params:pars, fmodel:fmod}
 
-return, [nudat, fmodel]
+return, restruct
 end
+
+;function greybody, x, imcube, XUNIT=xunit, FUNIT=funit, T_0=[20.,0], MU=mu$
+;			BETA=beta, KAPPA_0=kappa_0, NCOL=ncol, G2D=g2d;;, $
+;			;;PAR_INIT=parmInit, PAR_MIN=Pmin, PAR_MAX=Pmax, PAR_FIT=parmFit, $
+;			;;NPARFIX=nparfix, PLOTFIT=plotfit, $
+;			;;INFO=info, VERBOSE=verbose, SHOW=show, MAXITER=maxit
+;			;;use NPARFIX to pick which parameters to fit
+;
+;   ;;common IR_spectrum_fit, fitControl, WghtControl
+;   ;;common IR_spectrum_fit0, fitInitParams
+;   ;;common IR_spectrum_fit1, fitPlotOptions
+;   ;;common IR_spectrum_fit2, FitParLimits
+;
+;	;; probably need to move next 2 blocks to another function to loop over this one
+;	Nwav = N_elements(x)
+;	imd = size(imcube,/dimensions) ;;imd[-1] will be the same whether 1D or 3D - I checked
+;	if (Nwav LE 0) then STOP
+;
+;	if (Nwav NE imd[-1]) then begin
+;		message,"Error: Image cube depth =/= size of wavelength array" $
+;			+ string(7b),/INFO
+;		STOP,Nwav,imd
+;          endif
+;	
+;return	
+;end
 	
