@@ -1,6 +1,9 @@
+function greybody3D, x, imcube, ERRCUBE=errcube, XUNIT=xunit, FUNIT=funit, FWHM=fwhm,$
+		TC=Tc, NU0=nu0, BETA=beta, LOGNC=logNc, G2D=g2d, KAPPA0=kappa0, $
+		TBG=Tbg, LOGNBG=logNbg, VARY_ALL=vary_all, THRESHOLD=threshold, $
+		WEIGHT=weight, MODELNO=modelno, SAVEP=savep, PLOTMAP=plotmap ;;, INFO=info
+		;;VERBOSE=verbose, MAXITER=maxit
 ;+
-; NAME:
-;	greybody3D.pro
 ; PURPOSE:
 ;	Compute and fit greybody emission spectrum to given flux data
 ;	at for an array of wavelengths.
@@ -13,102 +16,67 @@
 ;	     -->tau = N_H*kappa_0*(mu*m_H/G2D)*(nu/nu_0)^beta
 ;	but that may make N_H unmanageably big, & conversion to those units hard
 ; CALLING:
-;	gb = greybody( x, fdat, ... see kwarg list)
+;	gb = greybody3D(x, fdat, ... see kwarg list)
 ;	***Some kwargs can be a float, or 2-, or 3-tuple:
 ;	arg = init_value -OR-
 ;	arg = [init_value, bool_fixed] -OR-
 ;	arg = [init_value, min, max]
-;	      (use -1 for min/max to switch to default min/max respectively)
+;	      (use -1 for min/max to sub in default min/max respectively)
 ; INPUTS:
 ;	x = array of wavelengths or frequencies, in any units allowed for XUNIT.
 ;		defaults to wavelength in microns
-;	fluxarr = 1D array of fluxes, or stack of images, at each wavelength
-;		in either Jy / arcsec^2, MJy/sr, or W/m^2/hz
+;	fluxarr = 3D array of fluxes, i.e. stack of images, at each wavelength
+;		in either Jy/asec^2, MJy/sr, Jy/beam, or W/m^2/hz
 ; KEYWORDS:
+;	ERRCUBE = 1D or 3D array of errors in flux, same units as fluxarr;
+;		if 1D, must be same length as x
+;		overrides weight if both are present
+;	WEIGHT = float array of weights for each flux, nominally in 
+;		units of 1/flux; nullified if errcube present
+;		see greybody.pro for default
 ;	XUNIT = string units of abscissa
 ;		accepts 'm', 'mm', 'um', 'nm', 'Hz', 'MHz', 'GHz', 'THz' 
 ;		default is 'um'
-;	FUNIT = alphanumeric string units of fdat
-;		accepts 'MJysr', 'Jyarcsec2', or 'Wm2hz' 
-;		default is 'Jyarcsec2'
+;	FUNIT = string units of fdat
+;		accepts 'MJy/sr','Jy/beam','Jy/asec2', 'W/m2/Hz', or all of the
+;		above without the '/'
 ;	THRESHOLD = lower limit of valid flux values
 ;		default is 1e-05, assuming FUNIT='Jyarcsec2'
 ;		will incorporate upper limits later
-;	VARY_ALL = Boolean: if set, unfix all variables (not recommended)
+;	VARY_ALL = Boolean: if set, unfix all variables (NOT RECOMMENDED - usu.
+;		insufficient data to constrain fit, plus Beta & T are degenerate)
+;	SAVE_P = Boolean: if set, save cube of fitting parameters & errors to
+;		parcube.sav (IDL-accessible-only .sav file)
 ;  ***Each of the following can be a single value or a tuple of 2 or 3 entries
-;	Tcold = initial guess of temperature for greybody fit
+;	TC = initial guess of temperature for greybody fit
 ;	NU0 = fiducial wavelength to fit kappa & beta w.r.t.
 ;	BETA = initial guess for emissivity
 ;	KAPPA0 = initial guess for opacity at fiducial frequency nu_0 (tbd), in m^2/kg
 ;		(note: 1 m^2/kg = 10 cm^2/g - please do your own conversion)
-;	lOGNCOLD = initial guess for column density from cold dust, in Hmol/m^2
+;	LOGNC = initial guess for column density from dust at clump/core/target
+;		in H2 molecules * m^-2
 ;	G2D = initial guess for gas-to-dust ratio; default is 133
-;	THOT = initial guess for temp of optional 2nd component
-;	lOGNHOT = initial guess for column density for optional 2nd component, Hmol/m^-2
+;	TBG = initial guess for temp of optional 2nd component
+;	LOGNBG = initial guess for column density for optional 2nd component, H2mol/m^-2
+;		 in H2 molecules * m^-2
 ; OUTPUTS:
-;	
+;	RESULTS: a struct containing cubes of fitting params & their errors @ each pixel
+;	Also can save parameter maps & error maps - still working on 
 ; COMMON BLOCKS:
 ;	None b/c I'm a Python native & these things bug the scheisse out of me
 ;	(I kid - it's a neat trick but I'm writing most of these
 ;	modules to work alone OR together)
 ; EXTERNAL CALLS:
-;	greybody.pro
-;	
-;	gbpstruct.pro (trying to decommish that one)
+;	nuFnu2SI.pro
+;	greybody.pro & its helper functions
 ;	*Assumes !const is defined, is in SI units, & contains mass of hydrogen atom
 ; HISTORY:
 ;	Written: Rebecca Pitts, 2016.
+;	Jan 2017 - updated to run with nuFnu2SI.pro
+;		helper fxns x2nu and fucon decomissioned
+;	Feb 2017 - added error cube & weight options, plotmap routine
+;
 ;---------------------------------------------------
-
-function x2nu, x, u
-	CASE u OF
-	    'm': nudat = reverse((double(!const.c))/x)
-	    'mm': nudat = reverse((double(!const.c) * 1e+3) / x)
-	    'um': nudat = reverse((double(!const.c) * 1e+6) / x)
-	    'nm': nudat = reverse((double(!const.c) * 1e+9) / x)
-	    'Hz': nudat = double(x)
-	    'MHz': nudat = double(x) * 1e+6
-	    'GHz': nudat = double(x) * 1e+9
-	    'THz': nudat = double(x) * 1e+12
-	    ELSE: message, 'Not a valid wavelength or frequency unit. Check spelling and case.'
-          ENDCASE
-  	return, nudat
-  end
-;---------------------------------------------------
-
-function fucon, f, u, xu, invrs
-    ;; doesn't matter what invrs is if not 0
-    ndims = size(f,/n_dimensions)
-    IF ((ndims GT 0) && (where(strmatch(xu,'*Hz',/fold_case)) EQ -1)) THEN $
-     	  rf = reverse(reform(double(f)),ndims) ELSE rf = reform(double(f))
-    ;;reverse(a,ndims) reverses array depthwise/along its last dimension
-    ;; only reverse f if x was in wavelength units; above checks to see if Hz in xunit
-    ;; if invrs=1, flux array should be already reversed so reversing again should set it right
-    IF ((invrs eq 0) || ~keyword_set(invrs)) THEN BEGIN
-	CASE u OF
-	    ;; 1 MJy/sr = 2.350443e-5 Jy/arcsec^2 = 10^-20 W/m^2/Hz
-	    'Jyarcsec2': newf = (rf / double(2.350443e-5)) * 1e-20
-	    'MJysr' : newf = rf * 1e-20
-	    'Wm2Hz' : newf = rf
-	    ELSE: message, "Not a valid flux density unit. Enter 'MJysr', 'Jyarcsec2', or 'Wm2Hz'."
-	  ENDCASE
-      ENDIF ELSE BEGIN
-	CASE u OF
-	    'Jyarcsec2': newf = (rf * double(2.350443e-5)) * 1e+20
-	    'MJysr' : newf = rf * 1e+20
-	    'Wm2Hz' : newf = rf
-	    ELSE: message, "Not a valid flux density unit. Enter 'MJysr', 'Jyarcsec2', or 'Wm2Hz'."
-	  ENDCASE
-      ENDELSE
-  return, newf
-  end
-;---------------------------------------------------
-
-function greybody3D, x, imcube, XUNIT=xunit, FUNIT=funit, TCOLD=Tcold, NU0=nu0, $
-		BETA=beta, LOGNCOLD=logNcold, G2D=g2d, KAPPA0=kappa0, $
-		THOT=Thot, LOGNHOT=logNhot, VARY_ALL=vary_all, THRESHOLD=threshold, $
-		WEIGHT=weight, SAVEP=savep;;VERBOSE=verbose, INFO=info, SHOW=show, MAXITER=maxit
-
     ;;common USER_INPUT x, xunit, funit, par_info
     ;;common IR_spectrum_fit, fitControl, WghtControl
     ;;common IR_spectrum_fit0, fitInitParams
@@ -116,37 +84,74 @@ function greybody3D, x, imcube, XUNIT=xunit, FUNIT=funit, TCOLD=Tcold, NU0=nu0, 
     ;;common IR_spectrum_fit2, FitParLimits
 
 	Nwav = N_elements(x)
+	IF (Nwav LE 0) OR (N_elements(imcube) LE 0) THEN RETALL, 'FatalError: Missing required input (check documentation)'
 	;;/dimensions gives size along each axis, /n_dimensions counts total dimensions
 	imd = size(imcube,/dimensions) ;;imd[-1] will be the same whether 1D or 3D - I checked
-	IF (Nwav LE 0) THEN RETALL, 'Error: Missing wavelength array'
-
 	IF (Nwav NE imd[-1]) THEN BEGIN
 	    MESSAGE,"Error: unequal image cube depth and length of wavelength array" + string(7b),/INFO
 	    RETALL,Nwav,imd
-          ENDIF
+         ENDIF
+        IF (N_elements(fwhm) LE 0) THEN fwhm = 37.0 ;;Mopra resolution
 
-    	if n_elements(xunit) lt 1 then xunit='um'
-    	if n_elements(funit) lt 1 then funit='Jyarcsec2'
-	nudat = x2nu(x,xunit) ;;convert flux in greybody_fit
-	fcube = fucon(imcube,funit,xunit,0)
+    	IF n_elements(xunit) LT 1 THEN xunit='um'
+    	IF n_elements(funit) LT 1 THEN funit='Jybeam'
+        SIdata = nuFnu2SI(x,imcube,xunit,funit,beam=fwhm)
+        nudat = SIdata.nu
+        fcube = SIdata.flux
+
+	IF (N_elements(errcube) GT 0) THEN BEGIN
+	    erd = size(errcube,/dimensions)
+	    IF (erd[-1] NE imd[-1]) THEN BEGIN
+	    	MESSAGE,"Error: image cube and error cube dimensions do not match" + string(7b),/INFO
+	    	RETALL,imd,erd
+	    ENDIF
+	    
+	    ecube = nuFnu2SI(x,errcube,xunit,funit,beam=fwhm,/xoff)
+	    IF (N_elements(weight) GT 0) THEN BEGIN
+		PRINT, 'Error array takes precedence over weight array; weight nullified'
+		weight=!null
+	    ENDIF
+	ENDIF ELSE IF (N_elements(errcube) EQ 0) AND (N_elements(weight) GT 0) THEN BEGIN
+	    wrd = size(weight,/dimensions)
+	    IF (wrd[-1] NE imd[-1]) THEN BEGIN
+	    	MESSAGE,"Error: image cube and weight cube dimensions do not match" + string(7b),/INFO
+	    	RETALL,imd,wrd
+	    ENDIF
+	    ecube = !null
+	ENDIF ELSE IF (N_elements(errcube) EQ 0) AND (N_elements(weight) EQ 0) THEN BEGIN
+	    weight = !null
+	    ecube = !null
+	    PRINT, 'Warning: defaulting to internal peak-biased weight scheme.'
+	    PRINT, 'Do not trust chi-squared values or parameter errors, if they print.'
+	ENDIF
+
 	IF n_elements(threshold) EQ 0 THEN threshold = 0.D
-	floor = (threshold NE 0) ? fucon(threshold,funit,xunit,0) : 0.D
-	;;mask cube before fucon - afterward, the precision needed to evaluate
-	;; relational operators is too small
+	bounds = (threshold NE 0) ? nuFnu2SI(x,threshold,xunit,funit,beam=fwhm,/xoff) : 0.D
+	;; has precision issues when bounds =/= 0
 
 	;; Defaults
-	keylist = ['TCOLD', 'NU0', 'BETA', 'LOGNCOLD', 'G2D', 'KAPPA0', 'THOT', 'LOGNHOT']
-	IF (n_elements(THOT) GT 0) OR (n_elements(LOGNHOT) GT 0) THEN BEGIN
+	keylist = ['TC', 'NU0', 'BETA', 'LOGNC', 'G2D', 'KAPPA0', 'TBG', 'LOGNBG']
+	IF (n_elements(TBG) GT 0) OR (n_elements(LOGNBG) GT 0) THEN BEGIN
 	    nkeys = 8
+	    modelno = 2 ;;
 	    defvals = [15.D, (double(!const.c) * 1e+6)/250.D, 1.8, 26.D, 124.D, 0.55D, 130.D, 24.D]
 	    defmina = [2.73D, double(3.0e+11), 0.9D, 20.D, 10.D, 0.001D, 50.D, 18.D]
 	    defmaxa = [50.D, double(3.0e+13), 3.D, 32.D, 2000.D, 0.65D, 1500.D, 28.D]
 	  ENDIF ELSE BEGIN
 	    nkeys = 6
+	    modelno = 1
 	    defvals = [20.D, (double(!const.c) * 1e+6)/250.D, 1.8, 26.D, 124.D, 0.55D]
 	    defmina = [2.73D, double(3.0e+11), 0.9D, 20.D, 10.D, 0.001D]
 	    defmaxa = [90.D, double(3.0e+13), 3.D, 32.D, 2000.D, 0.65D]
 	  ENDELSE
+
+	;;IF (n_elements(modelno) EQ 0) THEN modelno = 1
+	CASE modelno OF
+	    1:model = 'mbb1opthin'
+	    2:model = 'mbb2opthin'
+	    ;;3:'mbbfrt' -- this one's not ready yet
+	    ELSE:MESSAGE,"Error: invalid model number" + string(7b),/INFO
+	ENDCASE
 
 	par_info = replicate({value:0.D, fixed:1, limited:[1,1], limits:[0.D,0]}, nkeys)
 	par_info[*].value = defvals
@@ -199,48 +204,78 @@ function greybody3D, x, imcube, XUNIT=xunit, FUNIT=funit, TCOLD=Tcold, NU0=nu0, 
 	  ENDIF
 
 	;;mask bad/masked data - NOTE: values are 'good' where mask is TRUE
-	;;print, size(fcube,/dimensions),fcube[20,20,3]
-	mask = fcube[*,*,*] GT floor
+	mask = fcube[*,*,*] GT bounds
 	mfcube = fcube*mask
 	goodijk = where(mask[*,*,*],count,/null)
-	print, floor, count, min(fcube[goodijk])
+	;;print, bounds, count, min(fcube[goodijk])
 	;;pkeys = keylist[where(par_info.fixed[*] EQ 0, /null)]
-	freepars = where(par_info[*].fixed EQ 0, /null)
+	freepars = where(par_info[*].fixed EQ 0, count, /null)
+	dof=count
 	parcube = fltarr(imd[0],imd[1],nkeys);;n_elements(freepars)
+	puncube = fltarr(imd[0],imd[1],nkeys);;n_elements(freepars)
 	;;I'll work out how to make it a hash later
 	;;Our crusty old version of IDL doesn't do dictionaries or HasValues >:[
 
-	IF N_elements(weight) EQ 0 THEN weight=!null
+	print, 'par_info: ', par_info
+	print, 'dof: ', dof
 
 	FOR I=0,imd[0]-1 DO BEGIN
 	    FOR J=0,imd[1]-1 DO BEGIN
 		spec = reform(fcube[I,J,*])
-		goodi = where(spec GT floor, /null)
-		fatali = where(spec[1:-2] LT floor, count, /null)
-		;print, (goodi EQ !null) ? spec : goodi
-		CASE 1 OF
-		    (count GT 0): parcube[I,J,*] = !values.d_nan
-	    	    (N_elements(goodi) LT N_elements(par_info)): parcube[I,J,*] = !values.d_nan
-		    ((spec[0] LT floor) || (spec[-1] LT floor)): BEGIN
-			parcube[I,J,*] = reform(greybody(nudat[goodi], fcube[I,J,goodi], PAR_INFO=par_info,$
-					   THRESHOLD=floor, WEIGHT=weight[goodi], /autocall))
-		      END
-		    ELSE: BEGIN
-			parcube[I,J,*] = reform(greybody(nudat, fcube[I,J,*], PAR_INFO=par_info,$
-					   THRESHOLD=floor, WEIGHT=weight, /autocall))
-		      END
-		  ENDCASE
-	      ENDFOR
-	  ENDFOR
-	results = {nu:nudat,flux:fcube,params:parcube}
+		IF (ecube NE !null) THEN BEGIN
+		    IF (N_elements(ecube) LE Nwav) THEN err = reform(ecube) ELSE $
+			err = reform(ecube[I,J,*])
+		ENDIF ELSE err = !null
+		IF (weight NE !null) THEN BEGIN
+		    IF (N_elements(weight) LE Nwav) THEN wt = reform(weight) ELSE $
+			wt = reform(weight[I,J,*])
+		ENDIF ELSE wt = !null
+		IF (err NE !null) THEN goodi = where(spec GT err, /null) ELSE goodi = where(spec GT bounds, /null)
+		IF (err NE !null) THEN fatali = where(spec[1:-2] LE err[1:-2]/10, count, /null) ELSE $
+		    fatali = where(spec[1:-2] LE bounds, count, /null)
+		IF (count GT 0) OR (N_elements(goodi) LT N_elements(par_info)) THEN BEGIN
+		    parcube[I,J,*] = !values.d_nan
+		    puncube[I,J,*] = !values.d_nan
+	    	ENDIF ELSE IF ((spec[0] LT bounds) || (spec[-1] LT bounds)) THEN BEGIN
+		    IF (N_elements(err) LE 1) THEN errarr = !null ELSE errarr = err[goodi]
+		    IF (N_elements(wt) LE 1) THEN wtarr = !null ELSE wtarr = wt[goodi]
+		    print, N_elements(nudat[goodi]), N_elements(fcube[I,J,goodi]), N_elements(errarr[goodi])
+		    ;;I could use spec here instead of fcube[I,J,*], but I prefer not to
+		    gbstruct = greybody(nudat[goodi], reform(fcube[I,J,goodi]), ERRARR=errarr, FWHM=fwhm, $
+				PAR_INFO=par_info, MODELNO=modelno, THRESHOLD=bounds, WEIGHT=wtarr, /autocall)
+		    parcube[I,J,*] = reform(gbstruct.params)
+		    puncube[I,J,*] = reform(gbstruct.parerrs)
+		ENDIF ELSE BEGIN
+		    gbstruct = greybody(nudat, reform(fcube[I,J,*]), ERRARR=err, FWHM=fwhm, $
+				PAR_INFO=par_info, MODELNO=modelno, THRESHOLD=bounds, WEIGHT=wt, /autocall)
+		    parcube[I,J,*] = reform(gbstruct.params)
+		    puncube[I,J,*] = reform(gbstruct.parerrs)
+		ENDELSE
+	    ENDFOR
+	ENDFOR
+	results = {nu:nudat,flux:fcube,params:parcube,perrs:puncube}
 	;;IF keyword_set(verbose) THEN 
 	IF keyword_set(savep) THEN save, /variables, VERBOSE=verbose, FILENAME = 'parcube.sav'
 
-;;How to plot (don't use contour!) - e.g. for column density
-;; mask=where3d(parcube.flux[*,*,-1] GT 0,xind=x,yind=y)
-;; Narr=parcube.params[*,*,3]
-;; Ncmap=image(Narr*mask,TITLE='Region 26 H_2 Column Density Map', RGB_TABLE=15)
-;; cb = colorbar(TARGET=Ncmap,title='H_2 Column Density (m^-2)')
+	IF keyword_set(plotmap) THEN BEGIN
+	    Narr=results.params[*,*,3]
+	    Nerr=results.perrs[*,*,3]
+	    Narr[where3d(results.flux[*,*,-1] LE 0,xind=x,yind=y)]=!values.d_nan
+	    Nerr[where3d(results.flux[*,*,-1] LE 0,xind=x,yind=y)]=!values.d_nan
+
+	    Ncmap=image(Narr,TITLE='Region 26 $H_2$ Column Density Map', RGB_TABLE=15) ;;need wildcard regions
+	    cb = colorbar(TARGET=Ncmap,title='log$N(H_2)$ ($m^{-2}$)', orientation=1, POSITION=[0.2,0.2,0.25,0.8])
+	    ;; need user input filenames & dir names here, but I'll figure that out later
+	    Ncmap.save,"~/mosaic/scratch/NH2map_R26_2dof.png", border=10, resolution=400, /close
+	    print,"NH2map_R26_2dof.png saved to ~/mosaic/scratch/"
+
+	    Ncerrmap=image(Nerr,TITLE='Region 26 Error map for fitted $H_2$ Column Density', RGB_TABLE=15) ;;need wildcard regions
+	    cb = colorbar(TARGET=Ncerrmap,title='$\sigma$(log$N(H_2)$) ($m^{-2}$)', orientation=1, POSITION=[0.2,0.2,0.25,0.8])
+	    ;; need user input filenames & dir names here, but I'll figure that out later
+	    Ncerrmap.save,"~/mosaic/scratch/NH2map_err_R26_2dof.png", border=10, resolution=400, /close
+	    print,"NH2map_err_R26_2dof.png saved to ~/mosaic/scratch/"
+
+	ENDIF
 
     return, results
 end

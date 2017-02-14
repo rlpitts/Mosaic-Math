@@ -1,5 +1,5 @@
-function gbpstruct, Tcold, NU0=nu0, BETA=beta, LOGNCOLD=logNcold, G2D=g2d, KAPPA0=kappa0, $
-		THOT=Thot, LOGNHOT=logNhot, VARY_ALL=vary_all
+function gbpstruct, T, NU0=nu0, BETA=beta, LOGN=logN, G2D=g2d, KAPPA0=kappa0, $
+		TBG=Tbg, LOGNBG=logNbg, VARY_ALL=vary_all
 		;;don't want to do taglist b/c it's a pain in the arse to parse
 		;;taglist, PAR_INIT=parmInit, PAR_MIN=Pmin, PAR_MAX=Pmax, PAR_FIX=pfix
 ; PURPOSE:
@@ -12,15 +12,15 @@ function gbpstruct, Tcold, NU0=nu0, BETA=beta, LOGNCOLD=logNcold, G2D=g2d, KAPPA
 ;	arg = [init_value, min, max]
 ;	*use -1 for min/max to switch to default min/max respectively
 ; INPUTS:
-;	Tcold = initial guess of temperature for greybody fit
+;	T = initial guess of temperature for greybody fit
 ; KEYWORDS: each can be a single value or a tuple of 2, 3, or 4 entries
 ;	NU0 = fiducial wavelength to fit kappa & beta w.r.t.
 ;	BETA = initial guess for emissivity
 ;	KAPPA0 = initial guess for opacity at fiducial frequency nu_0 (tbd), in m^2/kg*
 ;	lOGNCOLD = initial guess for column density from cold dust, in Hmol/m^2
 ;	G2D = initial guess for gas-to-dust ratio; default is 133
-;	THOT = initial guess for temp of 2nd component
-;	lOGNHOT = initial guess for column density for optional 2nd component, Hmol/m^-2
+;	TBG = initial guess for temp of 2nd component
+;	lOGNBG= initial guess for column density for optional 2nd component, Hmol/m^-2
 ;	VARY_ALL = Boolean: if set, unfix all variables (not recommended)
 ; OUTPUTS:
 ;	PAR_INFO structure to use in MPFITFUN 
@@ -33,15 +33,15 @@ function gbpstruct, Tcold, NU0=nu0, BETA=beta, LOGNCOLD=logNcold, G2D=g2d, KAPPA
 ;	Written: Rebecca Pitts, 2016.
 ;---------------------------------------------------
 	;; Defaults
-	keylist = ['TCOLD', 'NU0', 'BETA', 'LOGNCOLD', 'G2D', 'KAPPA0', 'THOT', 'LOGNHOT']
-	IF (n_elements(THOT) GT 0) OR (n_elements(LOGNHOT) GT 0) THEN BEGIN
+	keylist = ['T', 'NU0', 'BETA', 'LOGN', 'G2D', 'KAPPA0', 'TBG', 'LOGNBG']
+	IF (n_elements(Tbg) GT 0) OR (n_elements(logNbg) GT 0) THEN BEGIN
 	    nkeys = 8
-	    defvals = [Tcold, (double(!const.c) * 1e+6)/250.D, 1.8, 26.D, 124.D, 0.55D, 130.D, 24.D]
+	    defvals = [T, (double(!const.c) * 1e+6)/250.D, 1.8, 26.D, 124.D, 0.55D, 130.D, 24.D]
 	    defmina = [2.73D, double(3.0e+11), 0.9D, 20.D, 10.D, 0.001D, 50.D, 18.D]
 	    defmaxa = [50.D, double(3.0e+13), 3.D, 32.D, 2000.D, 0.65D, 1500.D, 28.D]
 	  ENDIF ELSE BEGIN
 	    nkeys = 6
-	    defvals = [Tcold, (double(!const.c) * 1e+6)/250.D, 1.8, 26.D, 124.D, 0.55D]
+	    defvals = [T, (double(!const.c) * 1e+6)/250.D, 1.8, 26.D, 124.D, 0.55D]
 	    defmina = [2.73D, double(3.0e+11), 0.9D, 20.D, 10.D, 0.001D]
 	    defmaxa = [50.D, double(3.0e+13), 3.D, 32.D, 2000.D, 0.65D]
 	  ENDELSE
@@ -57,7 +57,7 @@ function gbpstruct, Tcold, NU0=nu0, BETA=beta, LOGNCOLD=logNcold, G2D=g2d, KAPPA
 	;; Command-line overrides
 	;; NOTE: scope_varfetch() looks for kwarg names to the right of the '=', not the left O_o
 	FOREACH element, keylist, index DO BEGIN
-	    IF ((N_elements(scope_varfetch(element)) GT 0) && (element NE 'Tcold')) THEN BEGIN
+	    IF ((N_elements(scope_varfetch(element)) GT 0) && (element NE 'T')) THEN BEGIN
 		var = scope_varfetch(element)
 		;;^cannot do this outside this if-statement or scope_varfetch GE 1 will always be true
 		par_info[index].value = var[0]
