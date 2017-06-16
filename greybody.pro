@@ -41,16 +41,7 @@
 ;		will incorporate upper limits later
 ;	VARY_ALL = Boolean: if set, unfix all variables (not recommended)
 ;	AUTOCALL = Boolean switch to distinguish solo calls from calls by greybody3D.pro
-;  ***Each of the following can be a single value or a tuple of 2 or 3 entries
-;	Tcold = initial guess of temperature for greybody fit
-;	NU0 = fiducial wavelength to fit kappa & beta w.r.t.
-;	BETA = initial guess for emissivity
-;	KAPPA0 = initial guess for opacity at fiducial frequency nu_0 (tbd), in m^2/kg
-;		(note: 1 m^2/kg = 10 cm^2/g - please do your own conversion)
-;	lOGNCOLD = initial guess for column density from cold dust, in Hmol/m^2
-;	G2D = initial guess for gas-to-dust ratio; default is 133
-;	THOT = initial guess for temp of optional 2nd component
-;	lOGNHOT = initial guess for column density for optional 2nd component, Hmol/m^-2
+;  ***See gbpstruct.pro for parameter descriptions
 ; OUTPUTS:
 ;	RESULT = either an array of best-fit parameters for SED fit, -or-
 ;		struct of arrays: nu in Hz, F(nu)_data in W/m^2/Hz, best-fit
@@ -76,104 +67,75 @@ function planck, nu, T
 ;---------------------------------------------------
 
 
-function mbb1opthin, X, P ;deriv, dP 
+function mbb1opthin, X, P
 	;; P[0] = T, P[1] = nu_0, P[2] = beta, P[3] = log(N_col), P[4] = G2D, P[5] = kappa_0
 	;; mu = mmw per unit H - assumes 71% H, 27% He, 2% Z
 	;;from Arthur Cox 2000 reproduction of "Allen's Astrophysical Quantities" (1955) - everyone uses this
 	;;alternative cited by Wikipedia doesn't seem to be reliable
 	;; assume mu = 2.8 & omega accounted for by xunit coversion
 
-	Inu = planck(X, P[0]) * ( (X / P[1])^P[2] ) * ( 10^P[3] * double(2.8 * !const.mH) / P[4] ) * P[5]
-
-;;	if N_params() ge 3 then begin
-;;	    Pderiv = dblarr(N_elements(X),N_elements(P))
-;;
-;;	    dT = Inu / (P[0]^2 * (exp( double(!const.h) * X / ( double(!const.k) * P[0] ) ) - 1) )
-;;	    dnu0 = -P[2] * Inu / P[1]
-;;	    dbeta = alog(P[2]) * Inu
-;;	    dNcol = ( alog(10)^2 ) * alog10(P[3]) * Inu
-;;	    dG2D = -Inu / P[4]
-;;	    dkappa = Inu/P[5]
-;;
-;;	    Pderiv[*,0] = dT
-;;	    Pderiv[*,1] = dnu0
-;;	    Pderiv[*,2] = dbeta
-;;	    Pderiv[*,3] = dNcol
-;;	    Pderiv[*,4] = dG2D
-;;	    Pderiv[*,5] = dkappa
-;;
-;;	    dP = Pderiv
-;;	  endif
-
+	Inu = planck(X, P[0]) * ( (X / P[1])^P[2] ) * ( 10.D^P[3] * double(2.8 * !const.mH) / P[4] ) * P[5]
 	return, Inu
   end
 ;---------------------------------------------------
 
 
-;; use APEX SAM threshold to determine fg/bg contamination (maybe)
-;; ASSUMPTIONS: 2nd component is local to 1st, has similar dust properties,
-;;  & is more tenuous (not sure if hotter or cooler)
-function mbb2opthin, X, P
-	;; P[0] = Tc, P[1] = nu_0, P[2] = beta, P[3] = log(N_col_c), P[4] = G2D, P[5] = kappa_0, 
-	;; P[6] = Th, P[7] = log(N_col_h)
+;; ASSUMPTIONS: negligible background - all emission local to source & self-attenuating
+function mbb1opthick, X, P
+	;; P[0] = Tc, P[1] = nu_0, P[2] = beta, P[3] = log(N_col_c), P[4] = G2D, P[5] = kappa_0
 	;; assume mu = 2.8 & no need for omega
 	;; PARAMETERS CANNOT BE REARRANGED (yes, it sucks)
 
-    	Inu1 = planck(X, P[0]) * ( (X / P[1])^P[2] ) * ( 10^P[3] * double(2.8 * !const.mH) / P[4] ) * P[5]
-	Inu2 = planck(X, P[6]) * ( (X / P[1])^P[2] ) * ( 10^P[7] * double(2.8 * !const.mH) / P[4] ) * P[5]
-	Inu = Inu1 + Inu2
-
+	bb = planck(X, P[0])
+	tau = ( (X / P[1])^P[2] ) * ( 10.D^P[3] * double(2.8 * !const.mH) / P[4] ) * P[5]
+    	Inu = bb * ( 1 - exp(-tau) )
 	return, Inu
   end
 ;---------------------------------------------------
 
 
-;;function mbbfrt, X, P ;deriv, dP 
-;;;; P[0] = T, P[1] = nu_0, P[2] = beta, P[3] = log(N_col), P[4] = G2D, 
-;;;; P[5] = kappa_0, P[6] = T_bg, P[7] = logN_bg, P[8] = T_fg, P[9] = logN_fg
-;;;; mu = mmw per unit H - assumes 71% H, 27% He, 2% Z
-;;;; assume mu = 2.8, *UNIFORM DUST COMPOSITION* & omega accounted for by xunit coversion
-;;;;*This is a whopper if there ever was one
-;;
-;;	bb = planck(X, P[0])
-;;	tau = ((X / P[1])^P[2] ) * ( 10^P[3] * double(2.8 * !const.mH) / P[4] ) * P[5]
-;;	bb_bg = planck(X, P[6])
-;;	tau_bg = ((X / P[1])^P[2] ) * ( 10^P[7] * double(2.8 * !const.mH) / P[4] ) * P[5]
-;;	bb_fg = planck(X, P[8])
-;;	tau_fg = ((X / P[1])^P[2] ) * ( 10^P[9] * double(2.8 * !const.mH) / P[4] ) * P[5]
-;;	Inu = ( bb * (1 - exp(tau)) ) + ( bb_bg * exp(tau_bg) ) + bb*tau_fg
-;;
-;;	if N_params() ge 3 then begin
-;;	    Pderiv = dblarr(N_elements(X),N_elements(P))
-;;
-;;	    dT = Inu / (P[0]^2 * (exp( double(!const.h) * X / ( double(!const.k) * P[0] ) ) - 1) )
-;;	    dnu0 = -P[2] * Inu / P[1]
-;;	    dbeta = alog(P[2]) * Inu
-;;	    dNcol = ( alog(10)^2 ) * alog10(P[3]) * Inu
-;;	    dG2D = -Inu / P[4]
-;;	    dkappa = Inu/P[5]
-;;
-;;	    Pderiv[*,0] = dT
-;;	    Pderiv[*,1] = dnu0
-;;	    Pderiv[*,2] = dbeta
-;;	    Pderiv[*,3] = dNcol
-;;	    Pderiv[*,4] = dG2D
-;;	    Pderiv[*,5] = dkappa
-;;
-;;	    dP = Pderiv
-;;	  endif
-;;
-;;	return, Inu
-;;  end
-;---------------------------------------------------
+function mbb2comp, X, P
+        ;; P[0] = T, P[1] = nu_0, P[2] = beta, P[3] = log(N_col), P[4] = G2D, 
+        ;; P[5] = kappa_0, P[6] = T_bg
+        ;; (see e.g. Magnum & Shirley 2015 review)
+        ;; mu = mmw per unit H - assumes 71% H, 27% He, 2% Z
+        ;; assume mu = 2.8, UNIFORM DUST COMPOSITION* & omega accounted for by xunit coversion
+        ;;*This is a whopper if there ever was one
+
+	bb = planck(X, P[0])
+	tau = ((X / P[1])^P[2] ) * ( 10.D^P[3] * double(2.8 * !const.mH) / P[4] ) * P[5]
+	bb_bg = planck(X, P[6])
+	Inu = ( bb * (1 - exp(-tau)) ) + ( bb_bg * exp(-tau) )
+        return, Inu
+  end
 ;---------------------------------------------------
 
 
-function greybody, x, fluxarr, ERRARR=errarr, XUNIT=xunit, FUNIT=funit, PAR_INFO=par_info, FWHM=fwhm, $
-			MODELNO=modelno, THRESHOLD=threshold, WEIGHT=weight, SAVEPLOT=saveplot, AUTOCALL=autocall ;;,$
-			;;PAR_INIT=parmInit, PAR_MIN=Pmin, PAR_MAX=Pmax, PAR_FIT=parmFit, $
-			;;NPARFIX=nparfix, PLOTFIT=plotfit, MAXITER=maxit, $
-			;;INFO=info, VERBOSE=verbose
+function mbb3comp, X, P ;deriv, dP 
+;; P[0] = T, P[1] = nu_0, P[2] = beta, P[3] = log(N_col), P[4] = G2D, 
+;; P[5] = kappa_0, P[6] = T_bg, P[7] = T_bg
+;; (see e.g. Magnum & Shirley 2015 review)
+;; mu = mmw per unit H - assumes 71% H, 27% He, 2% Z
+;; assume mu = 2.8, UNIFORM DUST COMPOSITION* & omega accounted for by xunit coversion
+;;*again, majorly suspect assumption
+
+	bb = planck(X, P[0])
+	tau = ((X / P[1])^P[2] ) * ( 10.^P[3] * double(2.8 * !const.mH) / P[4] ) * P[5]
+	bb_bg = planck(X, P[6])
+	bb_fg = planck(X, P[7])
+	Inu = ( bb * (1 - exp(-tau)) ) + ( bb_bg * exp(-tau) ) + bb_fg
+	return, Inu
+  end
+;---------------------------------------------------
+
+;============== BEGIN GREYBODY.PRO =================
+
+;---------------------------------------------------
+
+
+function greybody, x, fluxarr, ERRARR=errarr, XUNIT=xunit, FUNIT=funit, PAR_INFO=par_info,$
+			 FWHM=fwhm, PXWIDTH=pxwidth, MODELNO=modelno, THRESHOLD=threshold, WEIGHT=weight,$
+			 SAVEPLOT=saveplot, AUTOCALL=autocall
 
     ;;not using common blocks here because I want this function to be usable
     ;; independently as well - autocall kwarg set if called by greybody function
@@ -193,32 +155,35 @@ function greybody, x, fluxarr, ERRARR=errarr, XUNIT=xunit, FUNIT=funit, PAR_INFO
     	    IF n_elements(xunit) LT 1 THEN xunit='um'
 	    ;nudat = x2nu(x,xunit)
     	    IF (n_elements(funit) LT 1) THEN funit='Jy/beam'
-            IF (N_elements(fwhm) EQ 0) THEN BEGIN
-               beam = 37.0
+            IF (strpos(funit,'beam') NE -1) AND (N_elements(fwhm) EQ 0) THEN BEGIN
+               fwhm = 37.d
                print,"Data in Jy/beam but beam FWHM not supplied -- assuming Mopra resolution"
-            ENDIF
-
+            ENDIF ELSE beam = !NULL
+            IF (strpos(funit,'pixel') NE -1) AND (N_elements(pxwidth) EQ 0) THEN BEGIN
+               pxw = 12.d
+               print,"Data in Jy/pixel but pixel size not supplied -- assuming Mopra resolution"
+            ENDIF ELSE pxw = !NULL
     	    IF (n_elements(threshold) LT 1) THEN threshold = 1e-03
 
 	    ;fdat = fucon(fluxarr,funit,xunit,0)
-            SIdata = nuFnu2SI(x,fluxarr,xunit,funit,beam=fwhm)
+            SIdata = nuFnu2SI(x,fluxarr,xunit,funit,beam=fwhm,pxsz=pxw)
             nudat = SIdata.nu
 	    print, nudat
             fdat = SIdata.flux
 
 	    IF (n_elements(errarr) NE 0) THEN BEGIN
-		edat = nuFnu2SI(x,errarr,xunit,funit,beam=fwhm,/xoff)
+		edat = nuFnu2SI(x,errarr,xunit,funit,beam=fwhm,pxsz=pxw,/xoff)
 		weight = !null
 	    ENDIF ELSE BEGIN
 	    	IF (n_elements(weight) NE 0) THEN wdat = weight
 	    ENDELSE
 		
-	    floor = (threshold NE 0) ? nuFnu2SI(x,threshold,xunit,funit,beam=fwhm,/xoff) : 0
-	    ;; for some reason the logic doesn't work unless the floor is exactly 0
+	    bounds = (threshold NE 0) ? nuFnu2SI(x,threshold,xunit,funit,beam=fwhm,pxsz=pxw,/xoff) : 0
+	    ;; for some reason the logic doesn't work unless the bounds is exactly 0
 	    ;; assumes threshold & flux are in the same units
 
 	ENDIF ELSE BEGIN
-
+	    ;;fwhm not needed
 	    nudat = x
 	    fdat = reform(fluxarr)
 	    IF (n_elements(errarr) NE 0) THEN BEGIN
@@ -227,7 +192,7 @@ function greybody, x, fluxarr, ERRARR=errarr, XUNIT=xunit, FUNIT=funit, PAR_INFO
 	    ENDIF ELSE BEGIN
 	    	IF (n_elements(weight) NE 0) THEN wdat = reform(weight)
 	    ENDELSE
-	    floor = (n_elements(threshold) GT 1) ? reform(threshold) : threshold
+	    bounds = (n_elements(threshold) GT 1) ? reform(threshold) : threshold
 
 	ENDELSE
 
@@ -236,15 +201,14 @@ function greybody, x, fluxarr, ERRARR=errarr, XUNIT=xunit, FUNIT=funit, PAR_INFO
 	IF (n_elements(modelno) EQ 0) THEN modelno = 1
 	CASE modelno OF
 	    1:model = 'mbb1opthin'
-	    2:model = 'mbb2opthin'
-	    ;;3:'mbbfrt' ;;--> this one's not working yet
+	    2:model = 'mbb1opthick'
+	    3:model = 'mbb2comp' ;;--> kinda works in a different form (see iter_gb3d)
+	    4:model = 'mbb3comp' ;;--> this one's not working yet, probably insufficient data
 	    ELSE:MESSAGE,"Error: invalid model number" + string(7b),/INFO
 	  ENDCASE
 
 	;;NOTE: mpfitfun does not like masked data - take care of it topside
-	IF (n_elements(par_info) EQ 6) THEN BEGIN
-	    ;; if this doesn't work, there's probably something wrong with how
-	    ;; model name is being interpreted as a string
+	IF (modelno LT 3) THEN BEGIN
 	    IF (edat NE !null) THEN BEGIN
 	        parfit = mpfitfun(model, nudat, fdat, edat, parinfo=par_info, PERROR=perror, $
 			COVAR=covar, STATUS=status, ERRMSG=errmsg)
@@ -262,23 +226,10 @@ function greybody, x, fluxarr, ERRARR=errarr, XUNIT=xunit, FUNIT=funit, PAR_INFO
 	    IF (N_elements(edat) EQ N_elements(nudat)) THEN BEGIN
 		result = {nu:nudat, fdata:fdat, ferr:edat, params:parfit, parerrs:perror, fmodel:funcvals}
 	    ENDIF ELSE result = {nu:nudat, fdata:fdat, params:parfit, parerrs:perror, fmodel:funcvals}
-	    IF keyword_set(saveplot) THEN BEGIN
-		nufnu = result.nu*result.fdata
-		IF (tag_exist(result,'ferr') EQ 1) THEN BEGIN
-		    nuferr = result.nu*result.ferr
-		    p = errorplot(result.nu,nufnu,nuferr,'Dk2',errorbar_color='r',/sym_filled,/xlog,/ylog)
-		ENDIF ELSE p = plot(result.nu,result.fdata*result.nu,'Dk2',/sym_filled,/xlog,/ylog)
-		p.xtitle = '$\nu$ (Hz)'
-		p.ytitle = '$\nu$$F_{\nu}$ (W/$m^2$/Hz)'
-		p.xrange = [double(3e+11),double(1e+13)]
-		p1=plot(result.nu,result.fmodel*result.nu,'.db:1',/sym_filled,/overplot)
-		p.Save, "testSED.png", border=20, resolution=300, /CLOSE
-		print, 'plot saved to CWD'
-	    ENDIF
 	ENDIF ELSE BEGIN
 	    result = {params:parfit, parerrs:perror}
 	ENDELSE
-
+	;;call sedplot.pro if you want to plot
 return, result
 end
 	
