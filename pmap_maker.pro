@@ -31,25 +31,65 @@ pro pmap_maker, results, HDR=hdr, SAVEPLOT=saveplot, SAVEFITS=savefits, SAVEDIR=
      yarr = indgen(imd[1])+1
   ENDELSE
   
-  labelsetc = transpose([ transpose(keylist),[['Dust Temperature','T','(K)','13'], $
+  IF where(keylist EQ 'TW') NE -1 THEN BEGIN
+        labelsetc = transpose([ transpose(keylist),[['Cold Dust Temperature','T','(K)','13'], $
                                               ['Fiducial Frequency','$\nu_0$','(Hz)','13'], $
                                               ['Dust Emissivity Index','$\beta$','','13'], $
-                                              ['$H_2$ Column Density','log$N(H_2)$','($m^{-2}$)','17'], $
+                                              ['Cold $H_2$ Column Density','log$N(H_2)$','($m^{-2}$)','13'], $
+                                              ['Gas-to-Dust Mass Ratio','$M_{H_2}$/$M_{dust}$','','13'], $
+                                              ['Dust Opacity','$\kappa_0$','($m^2$/kg)','13'], $
+                                              ['Warm Dust Temperature','T','(K)','13'], $
+                                              ['Warm $H+H_2$ Column Density','log$N(H_2)$','($m^{-2}$)','13']]])
+        comments = ['Dust Temperature (K)','Fiducial Frequency (Hz)',$
+		'Dust Emissivity Index','H_2 Column Density (log Hmol/m^2)',$
+		'Gas-to-Dust Mass Ratio','Dust Opacity (m^2/kg)',$
+		'Warm Dust Temperature (K)','Warm H+H_2 Column Density (log Hmol/m^2)']
+   ENDIF ELSE BEGIN
+      CASE N_elements(keylist) OF
+        8: BEGIN
+           labelsetc = transpose([ transpose(keylist),[['Dust Temperature','T','(K)','13'], $
+                                              ['Fiducial Frequency','$\nu_0$','(Hz)','13'], $
+                                              ['Dust Emissivity Index','$\beta$','','13'], $
+                                              ['$H_2$ Column Density','log$N(H_2)$','($m^{-2}$)','13'], $
                                               ['Gas-to-Dust Mass Ratio','$M_{H_2}$/$M_{dust}$','','13'], $
                                               ['Dust Opacity','$\kappa_0$','($m^2$/kg)','13'], $
                                               ['Background Dust Temperature','T','(K)','13'], $
                                               ['Foreground Dust Temperature','T','(K)','13']]])
-    ;;^order is [key(save name), plot title, colorbar label, units, RGB_table]
-
-  ;;Do NOT move this inside the loop after it.
-  comments = ['Dust Temperature (K)','Fiducial Frequency (Hz)',$
+           comments = ['Dust Temperature (K)','Fiducial Frequency (Hz)',$
 		'Dust Emissivity Index','H_2 Column Density (log Hmol/m^2)',$
 		'Gas-to-Dust Mass Ratio','Dust Opacity (m^2/kg)',$
-		'2nd Dust Temperature (K)','2nd H_2 Column Density (log Hmol/m^2)']
+		'BG Dust Temperature (K)','FG Dust Temperature (K)']
+  	END
+        7: BEGIN
+           labelsetc = transpose([ transpose(keylist),[['Dust Temperature','T','(K)','13'], $
+                                              ['Fiducial Frequency','$\nu_0$','(Hz)','13'], $
+                                              ['Dust Emissivity Index','$\beta$','','13'], $
+                                              ['$H_2$ Column Density','log$N(H_2)$','($m^{-2}$)','13'], $
+                                              ['Gas-to-Dust Mass Ratio','$M_{H_2}$/$M_{dust}$','','13'], $
+                                              ['Dust Opacity','$\kappa_0$','($m^2$/kg)','13'], $
+                                              ['Background Dust Temperature','T','(K)','13']]])
+           comments = ['Dust Temperature (K)','Fiducial Frequency (Hz)',$
+		'Dust Emissivity Index','H_2 Column Density (log Hmol/m^2)',$
+		'Gas-to-Dust Mass Ratio','Dust Opacity (m^2/kg)',$
+		'BG Dust Temperature (K)']
+	END
+        6: BEGIN
+           labelsetc = transpose([ transpose(keylist),[['Dust Temperature','T','(K)','13'], $
+                                              ['Fiducial Frequency','$\nu_0$','(Hz)','13'], $
+                                              ['Dust Emissivity Index','$\beta$','','13'], $
+                                              ['$H_2$ Column Density','log$N(H_2)$','($m^{-2}$)','13'], $
+                                              ['Gas-to-Dust Mass Ratio','$M_{H_2}$/$M_{dust}$','','13'], $
+                                              ['Dust Opacity','$\kappa_0$','($m^2$/kg)','13']]])
+           comments = ['Dust Temperature (K)','Fiducial Frequency (Hz)',$
+		'Dust Emissivity Index','H_2 Column Density (log Hmol/m^2)',$
+		'Gas-to-Dust Mass Ratio','Dust Opacity (m^2/kg)']
+	END
+     ENDCASE
+  ENDELSE
 
+  IF sxpar(hdr,'naxis3') NE 0 THEN sxdelpar, hdr, 'naxis3'
   parhdr = hdr & punhdr = hdr
   IF keyword_set(savefits) THEN BEGIN ;;start building headers
-     IF sxpar(hdr,'naxis3') NE 0 THEN sxdelpar, parhdr, 'naxis3' & sxdelpar, punhdr, 'naxis3'
      FOR ind=0,N_elements(par_info)-1 DO BEGIN
 	card = strcompress('PARINIT'+string(ind),/remove_all)
         IF par_info[ind].fixed EQ 0 THEN BEGIN
@@ -109,17 +149,31 @@ pro pmap_maker, results, HDR=hdr, SAVEPLOT=saveplot, SAVEFITS=savefits, SAVEDIR=
 	   print, 'wrote '+keylist[ind]+' error map to '+pfupath
 	ENDIF
 
-     ENDIF ELSE IF (ind EQ 1) AND (par_info[1].fixed EQ 1) THEN BEGIN
-  	tau0 = (10.d^(results.params[*,*,3])*results.params[*,*,5]/results.params[*,*,4]) * double(2.8 * !const.mH)
-	errtau = sqrt( tau0^2 * ( ( alog(10)*results.perrs[*,*,3] )^2 + (results.perrs[*,*,4]/results.params[*,*,4])^2 $
-		 + (results.perrs[*,*,5]/results.params[*,*,5])^2 ) )
-	fidfreq = strcompress(string(round(par_info[1].value/1e+9)),/remove_all)
-	taumap=image(tau0,xarr,yarr,TITLE='Map of Optical Depth at '+fidfreq+' GHz', axis_style=2, $
-                   layout=[2,1,1], xtitle='GLON West (deg)', ytitle='GLAT (deg)', RGB_TABLE='13')
-	cb = colorbar(TARGET=taumap,title='$\tau_0$')
-	tauerrmap=image(errtau,xarr,yarr,TITLE='Error Map of Optical Depth at '+fidfreq+' GHz', axis_style=2, $
-			/current, layout=[2,1,2], xtitle='GLON West (deg)', ytitle='GLAT (deg)', RGB_TABLE='13')
-	cb = colorbar(TARGET=tauerrmap,title='$\sigma$($\tau_0$)')
-     ENDIF
+     ENDIF;; ELSE IF (ind EQ 1) AND (par_info[1].fixed EQ 1) THEN BEGIN
+ ; 	tau0 = (10.d^(results.params[*,*,3])*results.params[*,*,5]/results.params[*,*,4]) * double(2.8 * !csi.mH)
+;	errtau = sqrt( tau0^2 * ( ( alog(10)*results.perrs[*,*,3] )^2 + (results.perrs[*,*,4]/results.params[*,*,4])^2 $
+;		 + (results.perrs[*,*,5]/results.params[*,*,5])^2 ) )
+;	fidfreq = strcompress(string(round(par_info[1].value/1e+9)),/remove_all)
+;	taumap=image(tau0,xarr,yarr,TITLE='Map of Optical Depth at '+fidfreq+' GHz', axis_style=2, $
+ ;                  layout=[2,1,1], xtitle='GLON West (deg)', ytitle='GLAT (deg)', RGB_TABLE='rainbow')
+;	cb = colorbar(TARGET=taumap,title='$\tau_0$')
+;	tauerrmap=image(errtau,xarr,yarr,TITLE='Error Map of Optical Depth at '+fidfreq+' GHz', axis_style=2, $
+;			/current, layout=[2,1,2], xtitle='GLON West (deg)', ytitle='GLAT (deg)', RGB_TABLE='rainbow')
+;	cb = colorbar(TARGET=tauerrmap,title='$\sigma$($\tau_0$)')
+ ;    ENDIF
   ENDFOR
+
+  IF tag_exist(results,'iflux') AND keyword_set(savefits) THEN BEGIN
+     lumhdr = hdr & elumhdr = hdr
+     sxaddpar, lumhdr, 'QTTY', 'Integrated Flux (W/m^2)', after='naxis2'
+     sxaddpar, elumhdr, 'QTTY', 'Integrated Flux Naive Error Map (W/m^2)', after='naxis2'
+     lumpath = savedir+'/'+tail+'_integ_flux.fits'
+     elumpath = savedir+'/'+tail+'_integ_flux_err.fits'
+     sxaddpar, lumhdr, 'ERRMAP', elumpath, after='QTTY'
+     sxaddpar, elumhdr, 'IFLUXMAP', lumpath, after='QTTY'
+     writefits, lumpath, results.iflux, lumhdr
+     writefits, elumpath, results.iferr, elumhdr
+     print, 'wrote integrated flux map to '+lumpath
+     print, 'wrote integrated flux error map to '+elumpath
+  ENDIF
 END
